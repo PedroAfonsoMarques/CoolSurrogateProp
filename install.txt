@@ -1,0 +1,8 @@
+# Anaconda prompt "ls"
+dir
+
+# Anaconda prompt "cd"
+chdir
+
+# Install from the package location
+pip install -e .
