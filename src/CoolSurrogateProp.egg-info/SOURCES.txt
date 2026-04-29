@@ -1,0 +1,16 @@
+pyproject.toml
+src/CoolSurrogateProp/FluidEoS.py
+src/CoolSurrogateProp/ModelEoS.py
+src/CoolSurrogateProp/OptimizeEoS.py
+src/CoolSurrogateProp/SaveAndLoad_EoS.py
+src/CoolSurrogateProp/SolidEoS.py
+src/CoolSurrogateProp/TestEoS.py
+src/CoolSurrogateProp/TrainEoS.py
+src/CoolSurrogateProp.egg-info/PKG-INFO
+src/CoolSurrogateProp.egg-info/SOURCES.txt
+src/CoolSurrogateProp.egg-info/dependency_links.txt
+src/CoolSurrogateProp.egg-info/top_level.txt
+src/CoolSurrogateProp/SolidProperties/SS304.py
+src/CoolSurrogateProp/SolidProperties/SS316.py
+src/CoolSurrogateProp/SolidProperties/__init__.py
+src/CoolSurrogateProp/__backup__/SolidEoS.py

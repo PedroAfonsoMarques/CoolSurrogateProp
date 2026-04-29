@@ -13,7 +13,7 @@ from CoolSurrogateProp.OptimizeEoS import CalibrateAndSave, Settings
 plt.ioff()
 
 # Working fluid
-Fluid = "Nitrogen" # 'Hydrogen' 'Nitrogen' 'RE347MCC'
+Fluid = "Parahydrogen" # 'Hydrogen' 'Nitrogen' 'RE347MCC'
 REFPROP = False # True/False to use REFPROP or CoolProp
 
 # Output folder
@@ -36,7 +36,7 @@ T_min = None # Min. temperature [K] (if None, set to triple-poin5t temperature)
 # Initialize training settings
 settings = Settings(n_layers = 3, 
                     hidden_dim = [16,16,16],
-                    activation_fns = [nn.silu]*8, # [nn.silu, nn.silu, nn.silu, nn.silu],
+                    activation_fns = [nn.silu]*8,
                     eta0 = optax.schedules.exponential_decay(
                         init_value=5e-3, transition_begin=500, transition_steps=500, decay_rate=0.90
                         ),

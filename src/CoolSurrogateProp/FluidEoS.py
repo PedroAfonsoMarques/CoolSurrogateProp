@@ -15,8 +15,9 @@ class EquationOfState:
         
         # 0) Define available fluids and their surrogate model paths
         fluids = [
-            ("Nitrogen", base_dir / "Surrogate" / "Nitrogen"),
-            ("Hydrogen", base_dir / "Surrogate" / "Hydrogen"),
+            ("Nitrogen",     base_dir / "Surrogate" / "Nitrogen"),
+            ("Hydrogen",     base_dir / "Surrogate" / "Hydrogen"),
+            ("Parahydrogen", base_dir / "Surrogate" / "Parahydrogen"),
             # ("HFE-7000", base_dir / "Surrogate" / "RE347MCC"),
             # ("Oxygen",   base_dir / "Surrogate" / "Oxygen"),
         ]
