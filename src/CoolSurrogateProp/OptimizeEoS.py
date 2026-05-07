@@ -265,34 +265,40 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
     # =========================================================================
     
     # Define loss function (MSE)
-    def Loss(w, X, Y, dYdX, lmda):
-        
+    def Loss(w, X, Y, dYdX, lmda, epoch, eps=1e-8, alpha=0.3, warmup_start=200, warmup_end=1000):
         # Define model output for a single sample
         def model_output(x):
             return model.apply(w, x[None]).squeeze()
-        
-        # Property loss (MSE)
-        Y_pred = jax.vmap(model_output)(X)
-        loss_Y = jnp.mean((Y_pred - Y)**2)
-        
-        # Gradient loss
-        dYdX_pred = jax.vmap(jax.grad(model_output))(X)
-        loss_dYdX = jnp.mean((dYdX_pred - dYdX)**2)
-        
-        # Normalize
-        loss_Y_norm    = loss_Y    / jnp.mean(Y**2)
-        loss_dYdX_norm = loss_dYdX / jnp.mean(dYdX**2)
-        
-        # jax.debug.print("loss_Y={a}  loss_dYdX={b}", a=loss_Y_norm, b=loss_dYdX_norm)
 
-        return loss_Y_norm + lmda * loss_dYdX_norm
+        # Predictions
+        Y_pred, dYdX_pred = jax.vmap(jax.value_and_grad(model_output))(X)
+        
+        # Errors
+        Err_Y    = Y_pred    - Y
+        Err_dYdX = dYdX_pred - dYdX
+        
+        # Losses
+        L_Y_abs    = jnp.mean(Err_Y**2)           / jnp.mean(Y**2)
+        L_dYdX_abs = jnp.mean(Err_dYdX**2,axis=0) / jnp.mean(dYdX**2,axis=0)
+        
+        # Scale gradient penalty as iterations progress
+        lmda_eff = settings.deriv_penalty
+        
+        # Gradually enforce gradient penalty
+        # Annealing schedule: 0 before warmup_start, linear ramp, then flat
+        progress  = (epoch - warmup_start) / (warmup_end - warmup_start)  # 0 -> 1
+        progress  = jnp.clip(progress, 0.0, 1.0)                          # clamp
+        lmda_eff  = progress * settings.deriv_penalty
+        
+        # Return
+        return L_Y_abs + lmda_eff * jnp.sum( L_dYdX_abs ) / L_dYdX_abs.size 
     
     
     # Training iteration
     @jax.jit
-    def Train_step(w, opt_state, X_train, Y_train, dYdX_train, penalty):
+    def Train_step(w, opt_state, X_train, Y_train, dYdX_train, penalty, epoch):
         # Evaluate loss value and gradient
-        loss, grads = jax.value_and_grad(Loss)(w, X_train, Y_train, dYdX_train, penalty)
+        loss, grads = jax.value_and_grad(Loss)(w, X_train, Y_train, dYdX_train, penalty, epoch)
         # Optimizer step
         updates, opt_state = optimizer.update(grads, opt_state, w)
         # Update weights
@@ -341,7 +347,8 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
     if dYdX.ndim == 1:  # X is 1D: shape (n_samples,)
         dYdX_data = dYdX * (X_std / Y_std)
     elif dYdX.ndim == 2:  # X is 2D: shape (n_samples, n_inputs)
-        dYdX_data = dYdX * (X_std[None, :] / Y_std)
+        dYdX_data = dYdX * (X_std[None, :] / Y_std) 
+        
     # Store scaling parameters in dictionary
     X_hat_params = np.vstack((X_mean,X_std))
     Y_hat_params = np.vstack((Y_mean,Y_std))
@@ -376,7 +383,7 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
         else:
             dYdX_magnitude_ = np.abs(dYdX_batch_)  # shape: (n_samples,)
         # Power transform to emphasize large weights
-        dYdX_magnitude = jnp.power(dYdX_magnitude_, 4.0)
+        dYdX_magnitude = jnp.abs( jnp.power(dYdX_magnitude_, 1.0) )
             
         # Evaluate weights and sampling stuff based on largest gradients
         weights = dYdX_magnitude / np.sum(dYdX_magnitude)
@@ -386,11 +393,23 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
         dYdX_batch = dYdX_batch_[idx_sampled]
         
         # Apply training step
-        wp, opt_state, loss = Train_step(wp, opt_state, X_batch, Y_batch, dYdX_batch, settings.deriv_penalty)
+        wp, opt_state, loss = Train_step(wp, opt_state, X_batch, Y_batch, dYdX_batch, settings.deriv_penalty, epoch)
+        
+        # # =============================================================================
+        # # TODO: DEBUG  
+        # # =============================================================================
+        # loss_val, w_grads = jax.value_and_grad(Loss)(wp, X_batch, Y_batch, dYdX_batch, settings.deriv_penalty, epoch)
+        # # Outside JIT — regular print is fine here
+        # grad_norms = jax.tree_util.tree_map(lambda g: jnp.linalg.norm(g), w_grads)
+        # print(f"Loss: {loss_val:.6e}")
+        # print(f"Grad norms: {jax.tree_util.tree_leaves(grad_norms)}")
+        # # =============================================================================
+        # # TODO: DEBUG  
+        # # =============================================================================
         
         # Update loss history
         loss_train.append(float(loss))
-        loss_valid.append(float(Loss_JIT(wp, X_test, Y_test, dYdX_test, settings.deriv_penalty)))
+        loss_valid.append(float(Loss_JIT(wp, X_test, Y_test, dYdX_test, settings.deriv_penalty, epoch)))
         
         # Print/save training data
         if epoch % settings.N_save == 0:
