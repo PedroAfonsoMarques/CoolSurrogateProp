@@ -142,60 +142,133 @@ def Training_Data(Y_OUT, # Output fluid property
         P_1d = np.linspace(P_min, P_max, num=N)
         T_1d = np.linspace(T_min, T_max, num=N)
         
-        # =========================================================================
-        # Generate pressure-temperature grid within min-max values
-        # =========================================================================
-        # Pressure and temperature mesh-grid
-        P_2d, T_2d = np.meshgrid(P_1d, T_1d, indexing='xy')
-        # Flatten grid into one-dimensional pressure-temperature pairs
-        P_ = P_2d.flatten(); T_ = T_2d.flatten()
-        # Initialize fluid phase
-        Phi_ = []
-        # Loop through each P,T pair
-        for k in tqdm(range(N*N)):
-            # Evaluate phase for the pressure-temperature pair
-            Phi_.append(PhaseSI('P', P_[k], 'T', T_[k], Fluid))
-        # Convert phase list to array
-        Phi_ = np.array(Phi_)
-        
-        # =========================================================================
-        # Identify indices of the desired fluid phase
-        # =========================================================================
-        # Input phase: gas
-        if Phase.lower() == 'gas':
-            idx_Phi_g  = np.where((Phi_ == 'gas'))[0]
-            idx_Phi_sg = np.where((Phi_ == 'supercritical_gas'))[0]
-            idx_Phi = np.hstack((idx_Phi_g,idx_Phi_sg))
-        # Input phase: liquid
-        elif Phase.lower() == 'liquid':
-            idx_Phi = np.where((Phi_ == 'liquid'))[0]
-        # Not-valid phase
-        else:
-            print('Input phase NOT valid!')
+        if Phase.lower() == "universal":
+            # =========================================================================
+            # Create generic EOS training data for all phases (liquid, vapor, supercritical)
+            # =========================================================================
+            # A
+            X0_PminTmin = PropsSI(X_IN[0], 'P', P_min, 'T', T_min, Fluid)
+            X1_PminTmin = PropsSI(X_IN[1], 'P', P_min, 'T', T_min, Fluid)
+            # B
+            X0_PmaxTmax = PropsSI(X_IN[0], 'P', P_max, 'T', T_max, Fluid)
+            X1_PmaxTmax = PropsSI(X_IN[1], 'P', P_max, 'T', T_max, Fluid)
+            # C
+            X0_PminTmax = PropsSI(X_IN[0], 'P', P_min, 'T', T_max, Fluid)
+            X1_PminTmax = PropsSI(X_IN[1], 'P', P_min, 'T', T_max, Fluid)
+            # D
+            X0_PmaxTmin = PropsSI(X_IN[0], 'P', P_max, 'T', T_min, Fluid)
+            X1_PmaxTmin = PropsSI(X_IN[1], 'P', P_max, 'T', T_min, Fluid)
+            # Define min-max values for the inputs
+            X0_min = min(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
+            X0_max = max(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
+            X1_min = min(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
+            X1_max = max(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
+            # Set 1D input arrays
+            X0_1d = np.linspace(X0_min, X0_max, num=N)
+            X1_1d = np.linspace(X1_min, X1_max, num=N)
+            # Define meshgrid
+            X0_2d, X1_2d = np.meshgrid(X0_1d, X1_1d, indexing='xy')
+            # Flatten grid into one-dimensional input pairs
+            X0 = X0_2d.flatten()
+            X1 = X1_2d.flatten()
+            # =========================================================================
+            # Generate training data arrays
+            # =========================================================================
+            # Group pressure-temperature training data
+            X_Train = np.hstack((X0[:,None], X1[:,None]))
+            # Training fluid property data
+            Y_Train = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1, Fluid)
+            # Transport properties have no partial derivatives in CoolProp
+            if "conductivity" in Y_OUT.lower() or "viscosity" in Y_OUT.lower() or "surface_tension" in Y_OUT.lower():
+                # dYdX0_Train = np.ones_like(X0)
+                # dYdX1_Train = np.ones_like(X0)
+                # Numerical differences
+                eps_x0 = 1e-6 * np.abs(X0)
+                eps_x1 = 1e-6 * np.abs(X1)
+                # Perturb X0
+                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0 + eps_x0, X_IN[1], X1, Fluid)
+                Y_minus = PropsSI(Y_OUT, X_IN[0], X0 - eps_x0, X_IN[1], X1, Fluid)
+                dYdX0_Train = (Y_plus - Y_minus) / (2 * eps_x0)
+                # perturb X1
+                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 + eps_x1, Fluid)
+                Y_minus = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 - eps_x1, Fluid)
+                dYdX1_Train = (Y_plus - Y_minus) / (2 * eps_x1)
+            # Compute thermodynamic partial derivatives
+            else:
+                # Thermodynamic partial derivatives
+                dYdX0_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[0], X_IN[1]), X_IN[0], X0, X_IN[1], X1, Fluid)
+                dYdX1_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[1], X_IN[0]), X_IN[0], X0, X_IN[1], X1, Fluid)
+            # Group partial derivatives
+            dYdX_Train = np.hstack((dYdX0_Train[:,None], dYdX1_Train[:,None]))
             
-        # =========================================================================
-        # Generate training data arrays
-        # =========================================================================
-        # Generate pressure-temperature training data
-        P_Train = P_[idx_Phi]; T_Train = T_[idx_Phi]
-        # Evaluate training data, i.e., X_train = [X0, X1]
-        X0 = P_Train if X_IN[0] == 'P' else PropsSI(X_IN[0], 'P', P_Train, 'T', T_Train, Fluid)
-        X1 = T_Train if X_IN[1] == 'T' else PropsSI(X_IN[1], 'P', P_Train, 'T', T_Train, Fluid)
-        # Group pressure-temperature training data
-        X_Train = np.hstack((X0[:,None], X1[:,None]))
-        # Training fluid property data
-        Y_Train = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1, Fluid)
-        # Transport properties have no partial derivatives in CoolProp
-        if "conductivity" in Y_OUT.lower() or "viscosity" in Y_OUT.lower() or "surface_tension" in Y_OUT.lower():
-            dYdX0_Train = np.ones_like(X0)
-            dYdX1_Train = np.ones_like(X0)
-        # Compute thermodynamic partial derivatives
         else:
-            # Thermodynamic partial derivatives
-            dYdX0_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[0], X_IN[1]), X_IN[0], X0, X_IN[1], X1, Fluid)
-            dYdX1_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[1], X_IN[0]), X_IN[0], X0, X_IN[1], X1, Fluid)
-        # Group partial derivatives
-        dYdX_Train = np.hstack((dYdX0_Train[:,None], dYdX1_Train[:,None]))
+            # =========================================================================
+            # Generate pressure-temperature grid within min-max values
+            # =========================================================================
+            # Pressure and temperature mesh-grid
+            P_2d, T_2d = np.meshgrid(P_1d, T_1d, indexing='xy')
+            # Flatten grid into one-dimensional pressure-temperature pairs
+            P_ = P_2d.flatten(); T_ = T_2d.flatten()
+            # Initialize fluid phase
+            Phi_ = []
+            # Loop through each P,T pair
+            for k in tqdm(range(N*N)):
+                # Evaluate phase for the pressure-temperature pair
+                Phi_.append(PhaseSI('P', P_[k], 'T', T_[k], Fluid))
+            # Convert phase list to array
+            Phi_ = np.array(Phi_)
+            
+            # =========================================================================
+            # Identify indices of the desired fluid phase
+            # =========================================================================
+            # Input phase: gas
+            if Phase.lower() == 'gas':
+                idx_Phi_g  = np.where((Phi_ == 'gas'))[0]
+                idx_Phi_sg = np.where((Phi_ == 'supercritical_gas'))[0]
+                idx_Phi = np.hstack((idx_Phi_g,idx_Phi_sg))
+            # Input phase: liquid
+            elif Phase.lower() == 'liquid':
+                idx_Phi = np.where((Phi_ == 'liquid'))[0]
+            # Not-valid phase
+            else:
+                print('Input phase NOT valid!')
+                
+            # =========================================================================
+            # Generate training data arrays
+            # =========================================================================
+            # Generate pressure-temperature training data
+            P_Train = P_[idx_Phi]; T_Train = T_[idx_Phi]
+            # Evaluate training data, i.e., X_train = [X0, X1]
+            X0 = P_Train if X_IN[0] == 'P' else PropsSI(X_IN[0], 'P', P_Train, 'T', T_Train, Fluid)
+            X1 = T_Train if X_IN[1] == 'T' else PropsSI(X_IN[1], 'P', P_Train, 'T', T_Train, Fluid)
+            # Group pressure-temperature training data
+            X_Train = np.hstack((X0[:,None], X1[:,None]))
+            # Training fluid property data
+            Y_Train = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1, Fluid)
+            # Transport properties have no partial derivatives in CoolProp
+            if "conductivity" in Y_OUT.lower() or "viscosity" in Y_OUT.lower() or "surface_tension" in Y_OUT.lower():
+                # dYdX0_Train = np.ones_like(X0)
+                # dYdX1_Train = np.ones_like(X0)
+                # dYdX0_Train = np.ones_like(X0)
+                # dYdX1_Train = np.ones_like(X0)
+                # Numerical differences
+                eps_x0 = 1e-6 * np.abs(X0)
+                eps_x1 = 1e-6 * np.abs(X1)
+                # Perturb X0
+                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0 + eps_x0, X_IN[1], X1, Fluid)
+                Y_minus = PropsSI(Y_OUT, X_IN[0], X0 - eps_x0, X_IN[1], X1, Fluid)
+                dYdX0_Train = (Y_plus - Y_minus) / (2 * eps_x0)
+                # perturb X1
+                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 + eps_x1, Fluid)
+                Y_minus = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 - eps_x1, Fluid)
+                dYdX1_Train = (Y_plus - Y_minus) / (2 * eps_x1)
+            # Compute thermodynamic partial derivatives
+            else:
+                # Thermodynamic partial derivatives
+                dYdX0_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[0], X_IN[1]), X_IN[0], X0, X_IN[1], X1, Fluid)
+                dYdX1_Train = PropsSI('d(%s)/d(%s)|%s' %(Y_OUT, X_IN[1], X_IN[0]), X_IN[0], X0, X_IN[1], X1, Fluid)
+            # Group partial derivatives
+            dYdX_Train = np.hstack((dYdX0_Train[:,None], dYdX1_Train[:,None]))
     
     # Saturated vapor OR saturated liquid phase
     elif Nx == 1:
@@ -564,8 +637,8 @@ def Benchmark_CoolSurrogateProp(model, w_opt, loss_train, loss_valid, Xt, Yt, dY
         eps_d0 = np.max((np.abs(dYdXt[:,0]).min(), 1e-8))
         eps_d1 = np.max((np.abs(dYdXt[:,1]).min(), 1e-8))
         # Gradient
-        Err_dYdX0 = 100*np.abs(dYdXp[:,0] - dYdXt[:,0])/(np.mean(dYdXt[:,0]) + eps_d0)
-        Err_dYdX1 = 100*np.abs(dYdXp[:,1] - dYdXt[:,1])/(np.mean(dYdXt[:,1]) + eps_d1)
+        Err_dYdX0 = 100*np.abs(dYdXp[:,0] - dYdXt[:,0])/(dYdXt[:,0] + eps_d0)
+        Err_dYdX1 = 100*np.abs(dYdXp[:,1] - dYdXt[:,1])/(dYdXt[:,1] + eps_d1)
     elif Nx == 1:
         # Evaluate thermodynamic partial derivatives
         dYdXp = jax.vmap(dYdX_fn, in_axes=[0])(Xt)[:,0,0]
@@ -573,7 +646,7 @@ def Benchmark_CoolSurrogateProp(model, w_opt, loss_train, loss_valid, Xt, Yt, dY
         eps_d0 = np.max((np.abs(dYdXt).min(), 1e-8))
         eps_d1 = 0.0
         # Gradient
-        Err_dYdX0 = 100*np.abs(dYdXp - dYdXt)/(np.mean(dYdXt) + eps_d0)
+        Err_dYdX0 = 100*np.abs(dYdXp - dYdXt)/(dYdXt + eps_d0)
         Err_dYdX1 = 0.0
     else:
         print('Invalid number of inputs!')

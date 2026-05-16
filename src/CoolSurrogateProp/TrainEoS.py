@@ -5,6 +5,7 @@ import jax
 import optax
 import shutil
 import time
+import numpy as np
 import matplotlib.pyplot as plt
 from jax import nn
 from CoolSurrogateProp.OptimizeEoS import CalibrateAndSave, Settings
@@ -18,24 +19,29 @@ jax.config.update("jax_enable_x64", True)
 plt.ioff()
 
 # Working fluid
-Fluids = ['Parahydrogen', 'Hydrogen', 'Nitrogen', 'Oxygen', 'Methane' , 'Water'] 
+Fluids = ["Parahydrogen", "Hydrogen", "Nitrogen", "Oxygen", "Methane"] 
 REFPROP = False # True/False to use REFPROP or CoolProp
 
+N_layers          = 4 # Number of hidden layers in the surrogate model
+N_epochs          = int(5e3) # Number of training epochs
+N_data_points     = int(np.power(2, 8)) # Number of training data points (per property)
+N_data_points_sat = int(np.power(2,12)) # Number of training data points for saturation properties (per property)
 
 #%% Loop through fluid list
 
 for Fluid in Fluids:
+    print("========================================================")
+    print("Fluid: %s" %Fluid)
+    print("========================================================")
     
     # Output folder
-    FOL_OUT   = 'Surrogate_test/%s' %Fluid
-    FOL_OUT_I = '%s/Figures'   %FOL_OUT
+    FOL_OUT   = "Surrogate/%s" %Fluid
+    FOL_OUT_I = "%s/Figures"   %FOL_OUT
     # Create output folder if it does not exist
     if not os.path.exists(FOL_OUT): os.makedirs(FOL_OUT)
     if not os.path.exists(FOL_OUT_I): os.makedirs(FOL_OUT_I)
     
     #%%% EoS
-    
-    N = 4
     
     P_max = 10.0e5, # Max. pressure [Pa]
     T_max = 300.15, # Max. temperature [K]
@@ -43,37 +49,26 @@ for Fluid in Fluids:
     T_min = None    # Min. temperature [K] (if None, set to triple-poin5t temperature)
     
     # Initialize training settings
-    settings = Settings(n_layers = N, 
-                        hidden_dim = [24]*N,
-                        activation_fns = [nn.silu]*N,
+    settings = Settings(n_layers = N_layers, 
+                        hidden_dim = [24]*N_layers,
+                        activation_fns = [nn.silu]*N_layers,
                         eta0 = optax.schedules.exponential_decay(
                             init_value=2e-3, transition_begin=200, transition_steps=200, decay_rate=0.90
                             ),
                         deriv_penalty = 1e-4, # 1e-2
                         batch_frac    = 0.20,
-                        N_epochs      = int(5e3),
-                        N_data_points = int(64*6))
+                        N_epochs      = N_epochs,
+                        N_data_points = N_data_points)
+    
+    #%% Full-range (Enthalpy)
+
     # List thermodynamic properties
     Y = [
-        # Thermodynamic properties
-        'DMASS', 'CPMASS', 'CVMASS', 'HMASS', 'SMASS',
-        # Thermodynamic partial derivatives
-        'd(P)/d(T)|DMASS', 'd(P)/d(DMASS)|T',
-        'd(T)/d(P)|HMASS', 'd(T)/d(HMASS)|P',
-        'd(DMASS)/d(T)|P', 'd(DMASS)/d(P)|T', 
-        'd(UMASS)/d(T)|P', 'd(UMASS)/d(P)|T',
-        'd(UMASS)/d(DMASS)|T', 'd(UMASS)/d(T)|DMASS',
-        'd(SMASS)/d(T)|P', 'd(SMASS)/d(P)|T',
-        'd(SMASS)/d(DMASS)|T', 'd(SMASS)/d(T)|DMASS',
-        # Transport properties
-        'CONDUCTIVITY', 'VISCOSITY'
+        # Properties
+        "P","T"
         ]
-    # Target fluid phase
-    PHASE = ['gas','liquid']
-    
-    # Input arguments
-    X_IN = ['P','T']
-    
+    X_IN  = ["DMASS", "HMASS"]
+    PHASE = ["universal"]
     # Train equation-of-state Y = f(X0, X1)
     CalibrateAndSave(
         Y, X_IN, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
@@ -81,58 +76,127 @@ for Fluid in Fluids:
         REFPROP=REFPROP
         )
     
-    #%% Additional properties
-    
+    #%% Full-range (Internal energy)
+
     # List thermodynamic properties
-    Y = ['T',]
-    # Target fluid phase
-    PHASE = ['liquid','gas']
-    # Input arguments
-    X_IN = ['P','HMASS']
-    
+    Y = [
+        # Properties
+        "P","T"
+        ]
+    X_IN  = ["DMASS", "UMASS"]
+    PHASE = ["universal"]
     # Train equation-of-state Y = f(X0, X1)
     CalibrateAndSave(
         Y, X_IN, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
         P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
         REFPROP=REFPROP
         )
+
+    # #%% Single-phase properties
+
+    # # List thermodynamic properties
+    # Y = [
+    #     # Thermodynamic properties
+    #     "DMASS", "CPMASS", "CVMASS", "HMASS", "SMASS",
+    #     # Thermodynamic partial derivatives
+    #     "d(P)/d(T)|DMASS",     "d(P)/d(DMASS)|T",
+    #     "d(P)/d(HMASS)|DMASS", "d(P)/d(DMASS)|HMASS",
+    #     "d(T)/d(P)|HMASS",     "d(T)/d(HMASS)|P",
+    #     "d(DMASS)/d(T)|P",     "d(DMASS)/d(P)|T", 
+    #     "d(DMASS)/d(HMASS)|P", "d(DMASS)/d(P)|HMASS",
+    #     "d(UMASS)/d(T)|P",     "d(UMASS)/d(P)|T",
+    #     "d(UMASS)/d(DMASS)|T", "d(UMASS)/d(T)|DMASS",
+    #     "d(SMASS)/d(T)|P",     "d(SMASS)/d(P)|T",
+    #     "d(SMASS)/d(DMASS)|T", "d(SMASS)/d(T)|DMASS",
+    #     # Transport properties
+    #     "CONDUCTIVITY", "VISCOSITY"
+    #     ]
+    # # Target fluid phase
+    # PHASE = ["gas","liquid"]
     
-    #%%% Saturation
+    # # Input arguments
+    # X_IN = ["P","T"]
     
-    # Initialize training settings
-    settings = Settings(
-        n_layers = N, 
-        hidden_dim = [24]*N, 
-        activation_fns = [nn.silu]*N,
-        eta0 = optax.schedules.exponential_decay(
-            init_value=5e-3, transition_begin=200, transition_steps=200, decay_rate=0.90
-            ),
-        N_epochs = int(5e3),
-        batch_frac    = 0.20,
-        N_data_points = int(2048*4),
-        deriv_penalty = 1e-2,
-        )
+    # # Train equation-of-state Y = f(X0, X1)
+    # CalibrateAndSave(
+    #     Y, X_IN, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
+    #     P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
+    #     REFPROP=REFPROP
+    #     )
+
+    # #%% Additional properties
     
-    # Target fluid phase
-    PHASE = ['saturated_vapor','saturated_liquid']
-    # Y = f(T)
-    Ya = ['DMASS', 'HMASS', 'SMASS', 'P', 'SURFACE_TENSION', 'CONDUCTIVITY', 'CPMASS', 'VISCOSITY']; Xa = 'T'
-    # Y = f(P)
-    Yb = ['DMASS', 'HMASS', 'SMASS', 'T', 'SURFACE_TENSION', 'CONDUCTIVITY', 'CPMASS', 'VISCOSITY']; Xb = 'P'
+    # # List thermodynamic properties
+    # Y = ["T",]
+    # # Target fluid phase
+    # PHASE = ["liquid","gas"]
+    # # Input arguments
+    # X_IN = ["P","HMASS"]
     
-    # Train Ysat(T)
-    CalibrateAndSave(
-        Ya, Xa, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
-        P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
-        REFPROP=REFPROP)
-    # Train Ysat(P)
-    CalibrateAndSave(Yb, Xb, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
-                     P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
-                     REFPROP=REFPROP)
+    # # Train equation-of-state Y = f(X0, X1)
+    # CalibrateAndSave(
+    #     Y, X_IN, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
+    #     P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
+    #     REFPROP=REFPROP
+    #     )
+    
+    # #%%% Saturation
+    
+    # # Initialize training settings
+    # settings = Settings(
+    #     n_layers = N_layers, 
+    #     hidden_dim = [24]*N_layers, 
+    #     activation_fns = [nn.silu]*N_layers,
+    #     eta0 = optax.schedules.exponential_decay(
+    #         init_value=5e-3, transition_begin=200, transition_steps=200, decay_rate=0.90
+    #         ),
+    #     N_epochs = N_epochs,
+    #     batch_frac    = 0.20,
+    #     N_data_points = N_data_points_sat,
+    #     deriv_penalty = 1e-3,
+    #     )
+    
+    # # Target fluid phase
+    # PHASE = ["saturated_vapor","saturated_liquid"]
+    # # # ==========================
+    # # # Y = f(T)
+    # # # ==========================
+    # Ya = [
+    #     "DMASS", "HMASS", "SMASS", "P", "SURFACE_TENSION", "CONDUCTIVITY", "CPMASS", "VISCOSITY"
+    #     ]
+    # Xa = "T"
+    # # ==========================
+    # # Y = f(P)
+    # # ==========================
+    # Yb = [
+    #     # Thermodynamic properties
+    #     "DMASS", "HMASS", "SMASS", "T", "SURFACE_TENSION", "CONDUCTIVITY", "CPMASS", "VISCOSITY",
+    #     # Thermodynamic partial derivatives
+    #     "d(P)/d(T)|DMASS",     "d(P)/d(DMASS)|T",
+    #     "d(P)/d(HMASS)|DMASS", "d(P)/d(DMASS)|HMASS",
+    #     "d(T)/d(P)|HMASS",     "d(T)/d(HMASS)|P",
+    #     "d(DMASS)/d(T)|P",     "d(DMASS)/d(P)|T", 
+    #     "d(DMASS)/d(HMASS)|P", "d(DMASS)/d(P)|HMASS",
+    #     "d(UMASS)/d(T)|P",     "d(UMASS)/d(P)|T",
+    #     "d(UMASS)/d(DMASS)|T", "d(UMASS)/d(T)|DMASS",
+    #     "d(SMASS)/d(T)|P",     "d(SMASS)/d(P)|T",
+    #     "d(SMASS)/d(DMASS)|T", "d(SMASS)/d(T)|DMASS",
+    #     ]
+    # Xb = "P"
+    
+    # # Train Ysat(T)
+    # CalibrateAndSave(
+    #     Ya, Xa, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
+    #     P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
+    #     REFPROP=REFPROP)
+    # # Train Ysat(P)
+    # CalibrateAndSave(Yb, Xb, PHASE, Fluid, FOL_OUT, FOL_OUT_I, settings, 
+    #                  P_max=P_max, T_max=T_max, P_min=P_min, T_min=T_min,
+    #                  REFPROP=REFPROP)
     
     # Compress
-    shutil.make_archive(FOL_OUT_I, 'zip', FOL_OUT_I)
-    plt.close('all')
+    shutil.make_archive(FOL_OUT_I, "zip", FOL_OUT_I)
+    plt.close("all")
     # time.sleep(10)  # or 2 if Dropbox is involved
     # # Delete the original folder
     # shutil.rmtree(FOL_OUT_I)
