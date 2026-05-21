@@ -41,7 +41,7 @@ class EquationOfSolid:
             lambda T, idx: jax.lax.switch(idx, branches, T)
         )
 
-    def get_material_id(self, name: str) -> int:
+    def get_solid_id(self, name: str) -> int:
         """Return the integer index for a material name."""
         if name not in self._index:
             raise KeyError(f"Unknown material '{name}'. Available: {list(self._index)}")
@@ -63,7 +63,7 @@ class EquationOfSolid:
 
     def properties(self, material: int, T: float) -> dict:
         """Evaluate all solid properties at temperature T [K]."""
-        idx = self.get_material_id(material) if isinstance(material, str) else material
+        idx = self.get_solid_id(material) if isinstance(material, str) else material
         return self._jit_props(T, idx)
 
     def Kappa(self, material: int, T: float) -> float:

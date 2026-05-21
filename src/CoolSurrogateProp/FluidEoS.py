@@ -49,20 +49,32 @@ class EquationOfState:
         for name in PROPERTIES:
             # Generate table of all surrogate methods
             table = tuple(getattr(p, name) for p in self._props)
+            
+            # # Create method to evaluate properties
+            # def make_method(t):
+            #     return lambda self, fid, x: jax.lax.switch(fid, t, x)
+            # # Set method according to the property name
+            # setattr(self.__class__, name, make_method(table))
+            
             # Create method to evaluate properties
-            def make_method(t):
-                return lambda self, fid, x: jax.lax.switch(fid, t, x)
+            def make_method(t, is_sat):
+                if is_sat:
+                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SaturatedInput(*args))
+                else:
+                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SinglePhaseInput(*args))
             # Set method according to the property name
-            setattr(self.__class__, name, make_method(table))
+            # setattr(self.__class__, name, make_method(table, is_sat="_sat" in name))
+            setattr(self.__class__, name, make_method(table, is_sat=any(s in name.lower() for s in ("sat", "sigma"))))
+
 
     "Extract single-fluid ID by fluid name"
     def get_fluid_id(self, fluid_name):
         return self.fluid_id[fluid_name]
 
     "Evaluate single-phase property"
-    def PropI(self, prop1, prop2):
+    def SinglePhaseInput(self, prop1, prop2):
         return jnp.stack((jnp.array(prop1) , jnp.array(prop2))).T
 
     "Evaluate saturation property"
-    def SatI(self, prop1):
+    def SaturatedInput(self, prop1):
         return jnp.array(prop1).reshape(-1,1)

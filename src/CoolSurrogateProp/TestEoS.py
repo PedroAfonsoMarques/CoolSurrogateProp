@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 from CoolProp.CoolProp import PropsSI
 from CoolSurrogateProp.FluidEoS import EquationOfState
+from CoolSurrogateProp.MixtureProps import PropTP, RhoTP
 
 #%% User inputs
 
@@ -25,12 +26,12 @@ for fluid in fluids:
     # Temperature
     T_sat = [
         PropsSI("T","P",np.array(P),"Q",0.0,fluid),
-        EOS.T_sat(fluid_ID, EOS.SatI(P))
+        EOS.T_sat(fluid_ID, P)
         ]
     # Surface tension
     sigma = [
         PropsSI("SURFACE_TENSION","P",np.array(P),"Q",0.0,fluid),
-        EOS.lP_Sigma(fluid_ID, EOS.SatI(P))
+        EOS.lP_Sigma(fluid_ID, P)
         ]
 
     # =============================================================================
@@ -39,12 +40,12 @@ for fluid in fluids:
     # Vapor
     Rho_v_sat = [
         PropsSI("DMASS","P",np.array(P),"Q",1.0,fluid),
-        EOS.vP_Rho_sat(fluid_ID, EOS.SatI(P))
+        EOS.vP_Rho_sat(fluid_ID, P)
         ]
     # Liquid
     Rho_l_sat = [
         PropsSI("DMASS","P",np.array(P),"Q",0.0,fluid),
-        EOS.lP_Rho_sat(fluid_ID, EOS.SatI(P))
+        EOS.lP_Rho_sat(fluid_ID, P)
         ]
 
     # =============================================================================
@@ -53,12 +54,12 @@ for fluid in fluids:
     # Vapor
     H_v_sat = [
         PropsSI("HMASS","P",np.array(P),"Q",1.0,fluid),
-        EOS.vP_H_sat(fluid_ID, EOS.SatI(P))
+        EOS.vP_H_sat(fluid_ID, P)
         ]
     # Liquid
     H_l_sat = [
         PropsSI("HMASS","P",np.array(P),"Q",0.0,fluid),
-        EOS.lP_H_sat(fluid_ID, EOS.SatI(P))
+        EOS.lP_H_sat(fluid_ID, P)
         ]
 
     # =============================================================================
@@ -121,10 +122,12 @@ for fluid in fluids:
         # =============================================================================
         Rho = [
             PropsSI("DMASS","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_Rho(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_Rho(fluid_ID, EOS.PropI(P,T_jval)),
+            RhoTP(
+                Xe, 
+                EOS.lPT_Rho(fluid_ID, P, T_jval), 
+                EOS.vPT_Rho(fluid_ID, P, T_jval), 
+                EOS.lP_Rho_sat(fluid_ID, P), 
+                EOS.vP_Rho_sat(fluid_ID, P)
                 )
             ]
         
@@ -133,10 +136,12 @@ for fluid in fluids:
         # =============================================================================
         H = [
             PropsSI("HMASS","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_H(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_H(fluid_ID, EOS.PropI(P,T_jval)),
+            PropTP(
+                Xe, 
+                EOS.lPT_H(fluid_ID, P, T_jval), 
+                EOS.vPT_H(fluid_ID, P, T_jval), 
+                EOS.lP_H_sat(fluid_ID, P), 
+                EOS.vP_H_sat(fluid_ID, P)
                 )
             ]
         
@@ -145,18 +150,22 @@ for fluid in fluids:
         # =============================================================================
         Kappa = [
             PropsSI("CONDUCTIVITY","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_Kappa(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_Kappa(fluid_ID, EOS.PropI(P,T_jval)),
+            PropTP(
+                Xe, 
+                EOS.lPT_Kappa(fluid_ID, P, T_jval), 
+                EOS.vPT_Kappa(fluid_ID, P, T_jval), 
+                EOS.lP_Kappa_sat(fluid_ID, P), 
+                EOS.vP_Kappa_sat(fluid_ID, P)
                 )
             ]
         Mu = [
             PropsSI("VISCOSITY","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_Mu(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_Mu(fluid_ID, EOS.PropI(P,T_jval)),
+            PropTP(
+                Xe, 
+                EOS.lPT_Mu(fluid_ID, P, T_jval), 
+                EOS.vPT_Mu(fluid_ID, P, T_jval), 
+                EOS.lP_Mu_sat(fluid_ID, P), 
+                EOS.vP_Mu_sat(fluid_ID, P)
                 )
             ]
         
@@ -165,18 +174,22 @@ for fluid in fluids:
         # =============================================================================
         Cp = [
             PropsSI("CPMASS","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_Cp(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_Cp(fluid_ID, EOS.PropI(P,T_jval)),
+            PropTP(
+                Xe, 
+                EOS.lPT_Cp(fluid_ID, P, T_jval), 
+                EOS.vPT_Cp(fluid_ID, P, T_jval), 
+                EOS.lP_Cp_sat(fluid_ID, P), 
+                EOS.vP_Cp_sat(fluid_ID, P)
                 )
             ]
         Cv = [
             PropsSI("CVMASS","P",np.array(P),"T",T_eval,fluid),
-            jnp.where(
-                Xe <= 0,
-                EOS.lPT_Cv(fluid_ID, EOS.PropI(P,T_jval)),
-                EOS.vPT_Cv(fluid_ID, EOS.PropI(P,T_jval)),
+            PropTP(
+                Xe, 
+                EOS.lPT_Cv(fluid_ID, P, T_jval), 
+                EOS.vPT_Cv(fluid_ID, P, T_jval), 
+                EOS.lPT_Cv(fluid_ID, P, T_jval), 
+                EOS.vPT_Cv(fluid_ID, P, T_jval), 
                 )
             ]
         
@@ -216,7 +229,7 @@ for fluid in fluids:
         ax[2].set_ylabel(r"$\kappa$ [W/(mK)]")
         ax[3].set_ylabel(r"$\mu$ [Pa$\cdot$s]")
         ax[4].set_ylabel(r"$C_p$ [J/kg]")
-        ax[5].set_ylabel(r"$C_p$ [J/kg]")
+        ax[5].set_ylabel(r"$C_v$ [J/kg]")
         # Title
         fig.suptitle(r"%s | $T=%.2f$ K | CoolProp vs Surrogate" %(fluid, T_eval))
         fig.show()
