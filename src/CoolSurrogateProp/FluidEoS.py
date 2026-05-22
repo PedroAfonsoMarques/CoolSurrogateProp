@@ -59,9 +59,9 @@ class EquationOfState:
             # Create method to evaluate properties
             def make_method(t, is_sat):
                 if is_sat:
-                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SaturatedInput(*args))
+                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SaturatedInput(*args)).squeeze()
                 else:
-                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SinglePhaseInput(*args))
+                    return lambda self, fid, *args: jax.lax.switch(fid, t, self.SinglePhaseInput(*args)).squeeze()
             # Set method according to the property name
             # setattr(self.__class__, name, make_method(table, is_sat="_sat" in name))
             setattr(self.__class__, name, make_method(table, is_sat=any(s in name.lower() for s in ("sat", "sigma"))))
