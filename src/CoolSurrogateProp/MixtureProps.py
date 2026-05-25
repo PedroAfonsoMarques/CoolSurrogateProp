@@ -4,6 +4,28 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 
+#%% Alternative for JAXPROP
+
+"Mixture properties based on thermodynamic quality"
+def PropJTP(Xe, Ysp, Yl_sat, Yv_sat):
+    return jnp.where(
+        Xe < 0, Ysp, 
+        jnp.where(
+            Xe > 1, Ysp, 
+            Yl_sat + Xe * (Yv_sat - Yl_sat)
+            )
+        )
+"Mixture density based on inversion of the specific volume"
+def RhoJTP(Xe, rho_sp, rho_l_sat, rho_v_sat):
+    # Convert to specific volumes
+    v_sp = 1.0 / rho_sp
+    vl_sat = 1.0 / rho_l_sat
+    vv_sat = 1.0 / rho_v_sat
+    # Evaluate mixture specific volume
+    vs = PropJTP(Xe, v_sp, vl_sat, vv_sat)
+    # Return mixture density
+    return 1/vs
+
 #%% Hard-switch functions
 
 "Mixture properties based on thermodynamic quality"

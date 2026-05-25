@@ -100,7 +100,11 @@ for fluid in fluids:
     fig.suptitle(r"%s | Saturation properties | CoolProp vs Surrogate" %(fluid))
     fig.show()
 
-    # Fixed pressure, temperature sweep
+#%% Fixed pressure, temperature sweep
+
+for fluid in fluids:
+    # Fluid ID
+    fluid_ID = EOS.get_fluid_id(fluid)
 
     T = jnp.linspace(T_sat[0][0] - 5.0, 293.15, 100)
     P_list = [P[0], P[-1]]
@@ -235,6 +239,47 @@ for fluid in fluids:
         # Title
         fig.suptitle(r"%s | $P=%.2e$ bar | CoolProp vs Surrogate" %(fluid, P_eval))
         fig.show()
+
+#%% Reconstruct pressure from density and enthalpy
+
+fluids2 = fluids # ["Parahydrogen","Hydrogen"]
+
+for fluid in fluids2:
+    # Fluid ID
+    fluid_ID = EOS.get_fluid_id(fluid)
+
+    N = 1000
+
+    P = jnp.linspace(1.0e5, 5.0e5, N)
+    T = jnp.linspace(PropsSI("T","P",P[0],"Q",0,fluid)-2.0, 300.0, N)
+
+    # Density
+    Rho   = PropsSI("DMASS","P",np.array(P),"T",np.array(T),fluid)
+    Umass = PropsSI("UMASS","P",np.array(P),"T",np.array(T),fluid)
+    Hmass = PropsSI("HMASS","P",np.array(P),"T",np.array(T),fluid)
+
+    # =============================================================================
+    # Enthalpy
+    # =============================================================================
+    H_test = EOS.uDU_H(fluid_ID, Rho, Umass)
+    U_test = EOS.uDH_U(fluid_ID, Rho, H_test)
+    Rho_test = Rho*(H_test - U_test)
+
+    P_test = [
+        PropsSI("T","HMASS",Hmass,"DMASS",Rho,fluid),
+        EOS.uDH_T(fluid_ID, Rho, H_test)
+        ]
+
+    fig,ax = plt.subplots(nrows=2,tight_layout=True)
+    # f(Rho)
+    ax[0].plot(Rho, P_test[0], color="k")
+    ax[0].plot(Rho, P_test[1], color="b")
+    # f(H)
+    ax[1].plot(Hmass, P_test[0], color="k")
+    ax[1].plot(Hmass, P_test[1], color="b")
+    # Axes
+    ax[0].set_xscale("log")
+    
 
 #%% Run above ^^
 

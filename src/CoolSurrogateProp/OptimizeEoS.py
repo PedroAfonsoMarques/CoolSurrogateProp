@@ -146,53 +146,112 @@ def Training_Data(Y_OUT, # Output fluid property
             # =========================================================================
             # Create generic EOS training data for all phases (liquid, vapor, supercritical)
             # =========================================================================
-            # A
-            X0_PminTmin = PropsSI(X_IN[0], 'P', P_min, 'T', T_min, Fluid)
-            X1_PminTmin = PropsSI(X_IN[1], 'P', P_min, 'T', T_min, Fluid)
-            # B
-            X0_PmaxTmax = PropsSI(X_IN[0], 'P', P_max, 'T', T_max, Fluid)
-            X1_PmaxTmax = PropsSI(X_IN[1], 'P', P_max, 'T', T_max, Fluid)
-            # C
-            X0_PminTmax = PropsSI(X_IN[0], 'P', P_min, 'T', T_max, Fluid)
-            X1_PminTmax = PropsSI(X_IN[1], 'P', P_min, 'T', T_max, Fluid)
-            # D
-            X0_PmaxTmin = PropsSI(X_IN[0], 'P', P_max, 'T', T_min, Fluid)
-            X1_PmaxTmin = PropsSI(X_IN[1], 'P', P_max, 'T', T_min, Fluid)
-            # Define min-max values for the inputs
-            X0_min = min(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
-            X0_max = max(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
-            X1_min = min(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
-            X1_max = max(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
-            # Set 1D input arrays
+            # # A
+            # X0_PminTmin = PropsSI(X_IN[0], 'P', P_min, 'T', T_min, Fluid)
+            # X1_PminTmin = PropsSI(X_IN[1], 'P', P_min, 'T', T_min, Fluid)
+            # # B
+            # X0_PmaxTmax = PropsSI(X_IN[0], 'P', P_max, 'T', T_max, Fluid)
+            # X1_PmaxTmax = PropsSI(X_IN[1], 'P', P_max, 'T', T_max, Fluid)
+            # # C
+            # X0_PminTmax = PropsSI(X_IN[0], 'P', P_min, 'T', T_max, Fluid)
+            # X1_PminTmax = PropsSI(X_IN[1], 'P', P_min, 'T', T_max, Fluid)
+            # # D
+            # X0_PmaxTmin = PropsSI(X_IN[0], 'P', P_max, 'T', T_min, Fluid)
+            # X1_PmaxTmin = PropsSI(X_IN[1], 'P', P_max, 'T', T_min, Fluid)
+            # # Define min-max values for the inputs
+            # X0_min = min(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
+            # X0_max = max(X0_PminTmin, X0_PmaxTmax, X0_PminTmax, X0_PmaxTmin)
+            # X1_min = min(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
+            # X1_max = max(X1_PminTmin, X1_PmaxTmax, X1_PminTmax, X1_PmaxTmin)
+            # # Set 1D input arrays
+            # X0_1d = np.linspace(X0_min, X0_max, num=N)
+            # X1_1d = np.linspace(X1_min, X1_max, num=N)
+            # # Define meshgrid
+            # X0_2d, X1_2d = np.meshgrid(X0_1d, X1_1d, indexing='xy')
+            # # Flatten grid into one-dimensional input pairs
+            # X0 = X0_2d.flatten()
+            # X1 = X1_2d.flatten()
+
+            # # Define full P-T grid first
+            # P_1d = np.linspace(P_min, P_max, num=N)
+            # T_1d = np.linspace(T_min, T_max, num=N)
+            # P_2d, T_2d = np.meshgrid(P_1d, T_1d, indexing='xy')
+            # P_flat = P_2d.flatten()
+            # T_flat = T_2d.flatten()
+            # # Evaluate X0 and X1 over the full grid
+            # X0 = PropsSI(X_IN[0], 'P', P_flat, 'T', T_flat, Fluid)
+            # X1 = PropsSI(X_IN[1], 'P', P_flat, 'T', T_flat, Fluid)
+            P_corners = np.array([P_min, P_min, P_max, P_max])
+            T_corners = np.array([T_min, T_max, T_min, T_max])
+            X0_corners = PropsSI(X_IN[0], 'P', P_corners, 'T', T_corners, Fluid)
+            X1_corners = PropsSI(X_IN[1], 'P', P_corners, 'T', T_corners, Fluid)
+
+            X0_min, X0_max = X0_corners.min(), X0_corners.max()
+            X1_min, X1_max = X1_corners.min(), X1_corners.max()
+
+            # =========================================================================
+            # Step 2: Sample uniformly in (rho, h) space
+            # =========================================================================
             X0_1d = np.linspace(X0_min, X0_max, num=N)
             X1_1d = np.linspace(X1_min, X1_max, num=N)
-            # Define meshgrid
             X0_2d, X1_2d = np.meshgrid(X0_1d, X1_1d, indexing='xy')
             # Flatten grid into one-dimensional input pairs
             X0 = X0_2d.flatten()
             X1 = X1_2d.flatten()
+            # Evaluate P and T to mask out-of-domain points
+            P_grid = PropsSI('P', X_IN[0], X0, X_IN[1], X1, Fluid)
+            T_grid = PropsSI('T', X_IN[0], X0, X_IN[1], X1, Fluid)
+
+            # Keep only points within the intended (P, T) domain
+            valid = (
+                np.isfinite(P_grid) & (P_grid >= P_min) & (P_grid <= P_max) &
+                np.isfinite(T_grid) & (T_grid >= T_min) & (T_grid <= T_max)
+            )
+            X0 = X0[valid]
+            X1 = X1[valid]
+
             # =========================================================================
             # Generate training data arrays
             # =========================================================================
             # Group pressure-temperature training data
             X_Train = np.hstack((X0[:,None], X1[:,None]))
-            # Training fluid property data
-            Y_Train = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1, Fluid)
+            if Y_OUT.lower() == "xe":
+                def X_E(X0, X1, Fluid):
+                    P_sat  = PropsSI("P", X_IN[0], X0, X_IN[1], X1, Fluid)
+                    Hv_sat = PropsSI("HMASS", "P", P_sat, "Q", 1.0, Fluid)
+                    Hl_sat = PropsSI("HMASS", "P", P_sat, "Q", 0.0, Fluid)
+                    H      = PropsSI("HMASS", X_IN[0], X0, X_IN[1], X1, Fluid)
+                    Y_Train = (H - Hl_sat)/(Hv_sat-Hl_sat)
+                    return Y_Train
+                Y_Train = X_E(X0, X1, Fluid)
+            else:
+                # Training fluid property data
+                Y_Train = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1, Fluid)
             # Transport properties have no partial derivatives in CoolProp
-            if "conductivity" in Y_OUT.lower() or "viscosity" in Y_OUT.lower() or "surface_tension" in Y_OUT.lower():
+            if Y_OUT.lower() == "xe" or "conductivity" in Y_OUT.lower() or "viscosity" in Y_OUT.lower() or "surface_tension" in Y_OUT.lower():
                 # dYdX0_Train = np.ones_like(X0)
                 # dYdX1_Train = np.ones_like(X0)
                 # Numerical differences
-                eps_x0 = 1e-6 * np.abs(X0)
-                eps_x1 = 1e-6 * np.abs(X1)
-                # Perturb X0
-                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0 + eps_x0, X_IN[1], X1, Fluid)
-                Y_minus = PropsSI(Y_OUT, X_IN[0], X0 - eps_x0, X_IN[1], X1, Fluid)
-                dYdX0_Train = (Y_plus - Y_minus) / (2 * eps_x0)
-                # perturb X1
-                Y_plus  = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 + eps_x1, Fluid)
-                Y_minus = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 - eps_x1, Fluid)
-                dYdX1_Train = (Y_plus - Y_minus) / (2 * eps_x1)
+                eps_x0 = 1e-6 * np.maximum(np.abs(X0), 1.0)
+                eps_x1 = 1e-6 * np.maximum(np.abs(X1), 1.0)
+                if Y_OUT.lower() == "xe":
+                    # Perturb X0
+                    Y_plus  = X_E(X0 + eps_x0, X1, Fluid) # PropsSI(Y_OUT, X_IN[0], X0 + eps_x0, X_IN[1], X1, Fluid)
+                    Y_minus = X_E(X0 - eps_x0, X1, Fluid) # PropsSI(Y_OUT, X_IN[0], X0 - eps_x0, X_IN[1], X1, Fluid)
+                    dYdX0_Train = (Y_plus - Y_minus) / (2 * eps_x0)
+                    # perturb X1
+                    Y_plus  = X_E(X0, X1 + eps_x1, Fluid) # PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 + eps_x1, Fluid)
+                    Y_minus = X_E(X0, X1 - eps_x1, Fluid) # PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 - eps_x1, Fluid)
+                    dYdX1_Train = (Y_plus - Y_minus) / (2 * eps_x1)
+                else:
+                    # Perturb X0
+                    Y_plus  = PropsSI(Y_OUT, X_IN[0], X0 + eps_x0, X_IN[1], X1, Fluid)
+                    Y_minus = PropsSI(Y_OUT, X_IN[0], X0 - eps_x0, X_IN[1], X1, Fluid)
+                    dYdX0_Train = (Y_plus - Y_minus) / (2 * eps_x0)
+                    # perturb X1
+                    Y_plus  = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 + eps_x1, Fluid)
+                    Y_minus = PropsSI(Y_OUT, X_IN[0], X0, X_IN[1], X1 - eps_x1, Fluid)
+                    dYdX1_Train = (Y_plus - Y_minus) / (2 * eps_x1)
             # Compute thermodynamic partial derivatives
             else:
                 # Thermodynamic partial derivatives
@@ -346,13 +405,20 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
         # Predictions
         Y_pred, dYdX_pred = jax.vmap(jax.value_and_grad(model_output))(X)
         
-        # Errors
-        Err_Y    = Y_pred    - Y
-        Err_dYdX = dYdX_pred - dYdX
+        # # Errors
+        # Err_Y    = Y_pred    - Y
+        # Err_dYdX = dYdX_pred - dYdX
+        # # Losses
+        # L_Y_abs    = jnp.mean(Err_Y**2)           / jnp.mean(Y**2)
+        # L_dYdX_abs = jnp.mean(Err_dYdX**2,axis=0) / jnp.mean(dYdX**2,axis=0)
+
+        Loss_Y = jnp.mean((Y_pred - Y)**2)
+
         
-        # Losses
-        L_Y_abs    = jnp.mean(Err_Y**2)           / jnp.mean(Y**2)
-        L_dYdX_abs = jnp.mean(Err_dYdX**2,axis=0) / jnp.mean(dYdX**2,axis=0)
+        
+        
+        Err_dYdX = jnp.mean((dYdX_pred - dYdX)**2,axis=0) / jnp.mean(dYdX**2,axis=0)
+        L_dYdX   = jnp.mean(Err_dYdX)
         
         # Scale gradient penalty as iterations progress
         lmda_eff = settings.deriv_penalty
@@ -364,7 +430,7 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
         lmda_eff  = progress * settings.deriv_penalty
         
         # Return
-        return L_Y_abs + lmda_eff * jnp.sum( L_dYdX_abs ) / L_dYdX_abs.size 
+        return Loss_Y # + lmda_eff * jnp.sum( L_dYdX ) / L_dYdX.size 
     
     
     # Training iteration
@@ -425,6 +491,7 @@ def Model_Training(X_, Y_, dYdX_, settings, w0 = None):
     # Store scaling parameters in dictionary
     X_hat_params = np.vstack((X_mean,X_std))
     Y_hat_params = np.vstack((Y_mean,Y_std))
+    
     # Initial batch
     X_train, X_test, Y_train, Y_test, dYdX_train, dYdX_test = train_test_split(
         X_data,Y_data, dYdX_data,

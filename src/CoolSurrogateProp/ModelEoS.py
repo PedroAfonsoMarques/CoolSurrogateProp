@@ -21,13 +21,13 @@ class SurrogateEoS:
         # Y_universal = Y(DMASS, HMASS)
         # =====================================================================
         # Properties
-        self.uDH_P     = self.load_surrogate(FOL_IN,"universal_P(DMASS,HMASS)", JIT)
+        self.uDH_U     = self.load_surrogate(FOL_IN,"universal_UMASS(DMASS,HMASS)", JIT)
         self.uDH_T     = self.load_surrogate(FOL_IN,"universal_T(DMASS,HMASS)", JIT)
         # =====================================================================
         # Y_universal = Y(DMASS, UMASS)
         # =====================================================================
         # Properties
-        self.uDU_P     = self.load_surrogate(FOL_IN,"universal_P(DMASS,UMASS)", JIT)
+        self.uDU_H     = self.load_surrogate(FOL_IN,"universal_HMASS(DMASS,UMASS)", JIT)
         self.uDU_T     = self.load_surrogate(FOL_IN,"universal_T(DMASS,UMASS)", JIT)
         # =====================================================================
         # Y_fluid = Y(P, HMASS)
