@@ -2,7 +2,6 @@
 import jax
 import numpy as np
 import jax.numpy as jnp
-import functools
 from CoolProp.CoolProp import PropsSI
 
 jax.config.update("jax_enable_x64", True)
@@ -33,211 +32,106 @@ def _reshape_result(result, orig_shape):
     """Reshape result back to orig_shape, handling scalar case"""
     return np.array(result).reshape(orig_shape) if orig_shape else np.array(result).reshape(())
 
-@functools.lru_cache(maxsize=None)
 def PropsJI(output, input0, input1, fluid):
-
-    deriv_numeric = (
-        output.upper() in {"CONDUCTIVITY", "VISCOSITY", "PRANDTL", "SURFACE_TENSION"}
+    """
+    Creates a JAX-differentiable CoolProp property function.
+    f(x0, x1) -> PropsSI(output, input0, x0, input1, x1, fluid)
+    with exact thermodynamic derivatives.
+    """
+    # Selects finite-differences or analytical derivatives
+    deriv_numeric =(
+        output.upper() in {"CONDUCTIVITY", "VISCOSITY", "SURFACE_TENSION"}
         or input0.upper() == "Q"
         or input1.upper() == "Q"
     )
-
+    
+    "Function evaluation: f(x)"
     def _call_batched(x0, x1):
+        # Convert JAX inputs to numpy
         x0_, x1_, orig_shape = _broadcast_inputs(x0, x1)
+        # Evaluate PropsSI call
         result = PropsSI(output, input0, x0_, input1, x1_, fluid)
+        # Restore original input shape
         return _reshape_result(result, orig_shape)
 
+    # dfdx0 > Derivative wrt input0
     def _dfdx0(x0, x1):
+        # Convert JAX inputs to numpy
         x0_, x1_, orig_shape = _broadcast_inputs(x0, x1)
-        # FORCE physical bounds if this input represents Quality
-        if input0.upper() == "Q":
-            x0_ = np.clip(x0_, 0.0, 1.0)
+        # Numerical derivative
         if deriv_numeric:
             eps = 1e-6 * np.maximum(np.abs(x0_), 1.0)
+            # Check for quality
             if input0.upper() == "Q":
-                is_near_liquid = x0_ <= eps * 10.0
-                is_near_vapor  = x0_ >= (1.0 - eps * 10.0)
-                dx0_pos = np.where(is_near_vapor,  x0_, x0_ + eps)
-                dx0_neg = np.where(is_near_liquid, x0_, x0_ - eps)
+                dx0_pos = np.minimum(x0_ + eps, 1.0)
+                dx0_neg = np.maximum(x0_ - eps, 0.0)
             else:
                 dx0_pos = x0_ + eps
                 dx0_neg = x0_ - eps
-            fp = np.nan_to_num(PropsSI(output, input0, dx0_pos, input1, x1_, fluid), nan=0.0)
-            fm = np.nan_to_num(PropsSI(output, input0, dx0_neg, input1, x1_, fluid), nan=0.0)
-            denom = np.where((dx0_pos - dx0_neg) == 0.0, eps, dx0_pos - dx0_neg)
-            result = (fp - fm) / denom
+            # Evaluate perturbed values
+            fp  = PropsSI(output, input0, dx0_pos, input1, x1_, fluid)
+            fm  = PropsSI(output, input0, dx0_neg, input1, x1_, fluid)
+            result = (fp - fm) / (dx0_pos - dx0_neg)
+        # Analytical partial derivative
         else:
-            result = PropsSI(f"d({output})/d({input0})|{input1}", input0, x0_, input1, x1_, fluid)
+            result = PropsSI(f"d({output})/d({input0})|{input1}",input0, x0_, input1, x1_, fluid)
+        # Return partial derivative with original shape
         return _reshape_result(result, orig_shape)
-
+    
+    # dfdx1 > Derivative wrt input1
     def _dfdx1(x0, x1):
+        # Convert JAX inputs to numpy
         x0_, x1_, orig_shape = _broadcast_inputs(x0, x1)
-        # FORCE physical bounds if this input represents Quality
-        if input1.upper() == "Q":
-            x1_ = np.clip(x1_, 0.0, 1.0)
+        # Numerical derivative
         if deriv_numeric:
             eps = 1e-6 * np.maximum(np.abs(x1_), 1.0)
+            # Check for quality
             if input1.upper() == "Q":
-                is_near_liquid = x1_ <= eps * 10.0
-                is_near_vapor  = x1_ >= (1.0 - eps * 10.0)
-                dx1_pos = np.where(is_near_vapor,  x1_, x1_ + eps)
-                dx1_neg = np.where(is_near_liquid, x1_, x1_ - eps)
+                dx1_pos = np.minimum(x1_ + eps, 1.0)
+                dx1_neg = np.maximum(x1_ - eps, 0.0)
             else:
                 dx1_pos = x1_ + eps
                 dx1_neg = x1_ - eps
-            fp = np.nan_to_num(PropsSI(output, input0, x0_, input1, dx1_pos, fluid), nan=0.0)
-            fm = np.nan_to_num(PropsSI(output, input0, x0_, input1, dx1_neg, fluid), nan=0.0)
-            denom = np.where((dx1_pos - dx1_neg) == 0.0, eps, dx1_pos - dx1_neg)
-            result = (fp - fm) / denom
+            fp  = PropsSI(output, input0, x0_, input1, dx1_pos, fluid)
+            fm  = PropsSI(output, input0, x0_, input1, dx1_neg, fluid)
+            result = (fp - fm) / (dx1_pos - dx1_neg)
+        # Analytical partial derivative
         else:
             result = PropsSI(f"d({output})/d({input1})|{input0}", input0, x0_, input1, x1_, fluid)
+        # Return partial derivative with original shape
         return _reshape_result(result, orig_shape)
 
-    # ── Level 0: primal ──────────────────────────────────────────────────────
     @jax.custom_jvp
     def f(x0, x1):
-        x0, x1 = jnp.array(x0), jnp.array(x1)
+        # Ensure we are dealing with JAX-arrays
+        x0 = jnp.array(x0)
+        x1 = jnp.array(x1)
         out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-        return jax.pure_callback(
-            _call_batched,
-            jax.ShapeDtypeStruct(out_shape, x0.dtype),
-            x0, x1,
-            vmap_method="legacy_vectorized"
-        )
+        # Callback
+        return jax.pure_callback(_call_batched, jax.ShapeDtypeStruct(out_shape, x0.dtype), x0, x1, vmap_method="legacy_vectorized")
 
-    # ── Level 1: first derivatives (grad callbacks as stable primitives) ─────
-    @jax.custom_jvp
-    def grad0_fn(x0, x1):
-        x0, x1 = jnp.array(x0), jnp.array(x1)
-        out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-        return jax.pure_callback(
-            _dfdx0,
-            jax.ShapeDtypeStruct(out_shape, x0.dtype),
-            x0, x1,
-            vmap_method="legacy_vectorized"
-        )
-
-    @jax.custom_jvp
-    def grad1_fn(x0, x1):
-        x0, x1 = jnp.array(x0), jnp.array(x1)
-        out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-        return jax.pure_callback(
-            _dfdx1,
-            jax.ShapeDtypeStruct(out_shape, x0.dtype),
-            x0, x1,
-            vmap_method="legacy_vectorized"
-        )
-
-    # Level 2: second derivatives → zero (CoolProp is opaque beyond 1st)
-    @grad0_fn.defjvp
-    def grad0_jvp(primals, tangents):
-        x0, x1 = primals
-        return grad0_fn(x0, x1), jnp.zeros_like(grad0_fn(x0, x1))
-
-    @grad1_fn.defjvp
-    def grad1_jvp(primals, tangents):
-        x0, x1 = primals
-        return grad1_fn(x0, x1), jnp.zeros_like(grad1_fn(x0, x1))
-
-    # Wire everything together in the single f_jvp
     @f.defjvp
     def f_jvp(primals, tangents):
+        # Unpack primals, tangents
         x0, x1   = primals
         dx0, dx1 = tangents
-        x0,  x1  = jnp.array(x0),  jnp.array(x1)
+        # Ensure we are dealing with JAX-arrays
+        x0, x1 = jnp.array(x0), jnp.array(x1)
         dx0, dx1 = jnp.array(dx0), jnp.array(dx1)
-        primal_out  = f(x0, x1)
-        tangent_out = grad0_fn(x0, x1) * dx0 + grad1_fn(x0, x1) * dx1
+        # Output
+        out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
+        out_struct = jax.ShapeDtypeStruct(out_shape, x0.dtype)
+        # Functional evaluation
+        primal_out = f(x0, x1)
+        # Chain rule: df = (df/dx0)*dx0 + (df/dx1)*dx1
+        grad0 = jax.pure_callback(_dfdx0, out_struct, x0, x1, vmap_method="legacy_vectorized")
+        grad1 = jax.pure_callback(_dfdx1, out_struct, x0, x1, vmap_method="legacy_vectorized")
+        # Derivative terms
+        tangent_out = grad0 * dx0 + grad1 * dx1
+        # Value and derivatives
         return primal_out, tangent_out
+    # Return function value
     return f
-
-    
-    
-    # # 1. Base function declaration
-    # @jax.custom_jvp
-    # def f(x0, x1):
-    #     x0 = jnp.array(x0)
-    #     x1 = jnp.array(x1)
-    #     out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-    #     return jax.pure_callback(_call_batched, jax.ShapeDtypeStruct(out_shape, x0.dtype), x0, x1, vmap_method="legacy_vectorized")
-
-    # # 2. Explicit Forward Rule (Fixes optx.Newton / jax.linearize)
-    # @f.defjvp
-    # def f_jvp(primals, tangents):
-    #     x0, x1 = primals
-    #     dx0, dx1 = tangents
-        
-    #     x0, x1 = jnp.array(x0), jnp.array(x1)
-    #     dx0, dx1 = jnp.array(dx0), jnp.array(dx1)
-        
-    #     out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-    #     out_struct = jax.ShapeDtypeStruct(out_shape, x0.dtype)
-        
-    #     primal_out = f(x0, x1)
-        
-    #     grad0 = jax.pure_callback(_dfdx0, out_struct, x0, x1, vmap_method="legacy_vectorized")
-    #     grad1 = jax.pure_callback(_dfdx1, out_struct, x0, x1, vmap_method="legacy_vectorized")
-        
-    #     tangent_out = grad0 * dx0 + grad1 * dx1
-    #     return primal_out, tangent_out
-
-    # # 3. Explicit Backward Rule via custom_vjp injection
-    # # This prevents JAX from complaining during implicit matrix transposition in Optimistix
-    # @jax.custom_vjp
-    # def f_vjp_wrapper(x0, x1):
-    #     return f(x0, x1)
-
-    # def f_vjp_fwd(x0, x1):
-    #     return f(x0, x1), (x0, x1)
-
-    # def f_vjp_bwd(res, g):
-    #     x0, x1 = res
-    #     x0, x1 = jnp.array(x0), jnp.array(x1)
-    #     out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-    #     out_struct = jax.ShapeDtypeStruct(out_shape, x0.dtype)
-        
-    #     grad0 = jax.pure_callback(_dfdx0, out_struct, x0, x1, vmap_method="legacy_vectorized")
-    #     grad1 = jax.pure_callback(_dfdx1, out_struct, x0, x1, vmap_method="legacy_vectorized")
-        
-    #     return g * grad0, g * grad1
-
-    # f_vjp_wrapper.defvjp(f_vjp_fwd, f_vjp_bwd)
-
-    # # Return the version that behaves correctly everywhere
-    # return f
-
-
-    # @jax.custom_jvp
-    # def f(x0, x1):
-    #     # Ensure we are dealing with JAX-arrays
-    #     x0 = jnp.array(x0)
-    #     x1 = jnp.array(x1)
-    #     out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-    #     # Callback
-    #     return jax.pure_callback(_call_batched, jax.ShapeDtypeStruct(out_shape, x0.dtype), x0, x1, vmap_method="legacy_vectorized")
-
-    # @f.defjvp
-    # def f_jvp(primals, tangents):
-    #     # Unpack primals, tangents
-    #     x0, x1   = primals
-    #     dx0, dx1 = tangents
-    #     # Ensure we are dealing with JAX-arrays
-    #     x0, x1 = jnp.array(x0), jnp.array(x1)
-    #     dx0, dx1 = jnp.array(dx0), jnp.array(dx1)
-    #     # Output
-    #     out_shape = jnp.broadcast_shapes(x0.shape, x1.shape)
-    #     out_struct = jax.ShapeDtypeStruct(out_shape, x0.dtype)
-    #     # Functional evaluation
-    #     primal_out = f(x0, x1)
-    #     # Chain rule: df = (df/dx0)*dx0 + (df/dx1)*dx1
-    #     grad0 = jax.pure_callback(_dfdx0, out_struct, x0, x1, vmap_method="legacy_vectorized")
-    #     grad1 = jax.pure_callback(_dfdx1, out_struct, x0, x1, vmap_method="legacy_vectorized")
-    #     # Derivative terms
-    #     tangent_out = grad0 * dx0 + grad1 * dx1
-    #     # Value and derivatives
-    #     return primal_out, tangent_out
-    # # Return function value
-    # return f
 
 #%% Testing
 

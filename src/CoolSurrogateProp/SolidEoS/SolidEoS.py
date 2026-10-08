@@ -2,16 +2,35 @@
 import jax
 import jax.numpy as jnp
 from flax.core import FrozenDict
-from .SolidProperties import MATERIALS
+from CoolSurrogateProp.SolidEoS.SolidProperties import MATERIALS
 
 #%% Core NIST polynomial evaluator
 
+# @jax.jit
+# def _NIST_eval(T: jnp.ndarray, coeffs: jnp.ndarray) -> jnp.ndarray:
+#     "Horner via dot product: maps cleanly to a single BLAS/XLA kernel."
+#     log10T  = jnp.log10(T)
+#     powers  = log10T ** jnp.arange(len(coeffs))
+#     return 10.0 ** jnp.dot(coeffs, powers)
+
 @jax.jit
-def _NIST_eval(T: jnp.ndarray, coeffs: jnp.ndarray) -> jnp.ndarray:
-    "Horner via dot product: maps cleanly to a single BLAS/XLA kernel."
-    log10T  = jnp.log10(T)
-    powers  = log10T ** jnp.arange(len(coeffs))
-    return 10.0 ** jnp.dot(coeffs, powers)
+def _NIST_eval(T, coeffs):
+    # 1. Protect the log input from zero/negative values (use 10.0 so log10(10.0) = 1.0)
+    # This ensures log10T is never 0.0, completely avoiding 0^0 issues.
+    T_safe = jnp.where(T > 0.0, T, 10.0)
+    log10T = jnp.log10(T_safe)
+    
+    # 2. Evaluate the polynomial using Horner's Method instead of **
+    # We reverse the coefficients to go from highest power to lowest
+    val = 0.0
+    for c in reversed(coeffs):
+        val = val * log10T + c
+        
+    # 3. Convert back from log scale
+    final_property = 10.0 ** val
+    
+    # 4. Mask the final output to ensure safety
+    return jnp.where(T > 0.0, final_property, 0.0)
 
 #%% Branch builder
 
@@ -88,7 +107,7 @@ class EquationOfSolid:
 
     def __repr__(self) -> str:
         return f"EquationOfSolid([{', '.join(self._registry)}])"
-    
+
 #%% Testing
 
 if __name__ == "__main__":
@@ -121,3 +140,5 @@ if __name__ == "__main__":
         ax[1].set_xlabel("T [K]")
         ax[0].minorticks_on(); ax[0].grid(axis="both", which="both", alpha=0.3)
         ax[1].minorticks_on(); ax[1].grid(axis="both", which="both", alpha=0.3)
+
+#%% Run above^

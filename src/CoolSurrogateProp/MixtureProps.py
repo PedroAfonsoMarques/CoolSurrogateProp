@@ -65,7 +65,7 @@ def target_k_poly(Xe_t=0.01):
     return 1.0 / Xe_t
 
 # Define a target k for smooth switching
-K_T = target_k_poly(Xe_t = 0.01)
+K_T = target_k_poly(Xe_t = 0.05)
 
 "Smooth gate function (smooth version of jnp.clip)"
 def compact_gate(x):
@@ -97,6 +97,37 @@ def softclip(x, xmin, xmax, k=K_T):
     x = (-1.0 / k) * logsumexp(jnp.stack([-k * x, -k * x_max], axis=0), axis=0)
     # Return clipped boi
     return x
+
+#%% JAXPROP
+
+"Mixture properties based on thermodynamic quality (smooth-ish)"
+def PropJTPS(Xe, Y_sp, Yl_sat, Yv_sat, k=K_T):
+    # Smooth-switch gates
+    g0, g1 = gates(Xe, k)
+    # Clip quality
+    Xe_c = jnp.clip(Xe, 0.0, 1.0) # softclip(Xe, xmin=0.0, xmax=1.0) 
+    # Mixture property in the two-phase region
+    Ym = Yl_sat + Xe_c * (Yv_sat - Yl_sat)
+    # Define a single gating factor that evaluates to 1.0 inside the dome (0 < Xe < 1)
+    # and 0.0 outside the dome (Xe <= 0 or Xe >= 1)
+    inside_dome = g0 * (1.0 - g1)
+    # Smoothly blend the three regions together
+    Y_s = (1 - inside_dome) * Y_sp  +  inside_dome * Ym 
+    # Return mixture property
+    return Y_s
+
+"Mixture density based on thermodynamic quality (smooth-ish)"
+def RhoJTPS(Xe, rho_sp, rho_l_sat, rho_v_sat, k=K_T, eps=1e-6):
+    # Convert to specific volumes
+    v_sp   = 1.0 / rho_sp
+    vl_sat = 1.0 / rho_l_sat
+    vv_sat = 1.0 / rho_v_sat
+    # Evaluate mixture specific volume
+    vs = PropJTPS(Xe, v_sp, vl_sat, vv_sat, k)
+    # Return mixture density
+    return 1/(vs + eps)
+
+#%% Surrogate
 
 "Mixture properties based on thermodynamic quality (smooth-ish)"
 def PropTPS(Xe, Yl, Yv, Yl_sat, Yv_sat, k=K_T):
